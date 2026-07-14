@@ -10,7 +10,8 @@ app = Flask(__name__)
 
 NOTION_API_KEY = os.environ.get("NOTION_API_TOKEN", "")
 MOVIMIENTOS_DB = os.environ.get("MOVIMIENTOS_DB", "")
-BUDGET_MONTHLY = 1_000_000  # $1,000,000/month
+PERIODO_DB = "39d06589-4ee5-8036-a3ef-c73eadeae4f8"
+BUDGET_MONTHLY = None  # Will be fetched from Notion
 
 CATEGORY_KEYWORDS = {
     "comida": ["restaurant", "starbucks", "café", "sushi", "pizza", "delivery", "pedidos", "super", "tottus", "lider", "jumbo", "mercado"],
@@ -65,6 +66,32 @@ def register_notion(amount: int, merchant: str, category: str, source: str = "CM
     return resp.status_code == 200
 
 
+def get_monthly_budget() -> int:
+    """Fetch the current month's budget from Notion Periodo DB."""
+    if not NOTION_API_KEY:
+        return 1_000_000  # fallback
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+    }
+    # Find the active period page
+    data = {"filter": {"property": "Activo", "checkbox": {"equals": True}}}
+    resp = requests.post(
+        f"https://api.notion.com/v1/data_sources/{PERIODO_DB}/query",
+        headers=headers,
+        json=data,
+    )
+    if resp.status_code != 200:
+        return 1_000_000
+    for result in resp.json().get("results", []):
+        props = result.get("properties", {})
+        for k, v in props.items():
+            if v.get("type") == "number":
+                return v.get("number", 1_000_000)
+    return 1_000_000
+
+
 def get_monthly_spent() -> int:
     """Get total spent this month from Notion."""
     if not NOTION_API_KEY:
@@ -115,8 +142,9 @@ def send_telegram(message: str):
 def process_and_respond(amount: int, merchant: str, category: str, source: str):
     """Register expense, get budget, send Telegram, return JSON."""
     registered = register_notion(amount, merchant, category, source)
+    budget = get_monthly_budget()
     spent = get_monthly_spent()
-    remaining = BUDGET_MONTHLY - spent - amount
+    remaining = budget - spent - amount
 
     response = (
         f"✅ **${amount:,}** registrado en *{merchant}* ({source})\n"
