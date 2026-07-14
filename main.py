@@ -134,6 +134,24 @@ def home():
     return jsonify({"status": "ok", "service": "budget-webhook"})
 
 
+@app.route("/test-telegram", methods=["GET"])
+def test_telegram():
+    """Test endpoint to check Telegram connectivity."""
+    if not TELEGRAM_BOT_TOKEN:
+        return jsonify({"error": "TELEGRAM_BOT_TOKEN not set"}), 400
+    if not TELEGRAM_GROUP_ID:
+        return jsonify({"error": "TELEGRAM_GROUP_ID not set"}), 400
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    resp = requests.post(url, json={
+        "chat_id": TELEGRAM_GROUP_ID,
+        "text": "🧪 Test desde budget-webhook — si ves esto, Telegram funciona ✅"
+    }, timeout=10)
+    return jsonify({
+        "status": resp.ok,
+        "code": resp.status_code,
+        "response": resp.json() if resp.ok else resp.text[:200],
+    })
+
 @app.route("/tasker", methods=["GET"])
 def tasker_webhook():
     """Endpoint that Tasker calls with CMR notifications."""
