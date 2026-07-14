@@ -36,47 +36,17 @@ def infer_category(comercio: str) -> str:
     return "otro"
 
 
-def is_relevant_notification(text: str) -> bool:
-    """Check if the notification is a relevant expense (CMR purchase)."""
-    text_lower = text.lower()
-    ignore_keywords = ["charging", "battery", "%evtprm", "puntos", "oferta", "avance", "no te pierdas"]
-    for kw in ignore_keywords:
-        if kw in text_lower:
-            return False
-    return True
+def clean_text(text: str) -> str:
+    """Remove Tasker placeholders and common junk."""
+    return re.sub(r'%20|%evtprm\d|%NTITLE|%NTEXT|cl\.android', '', text).strip()
 
 
-def parse_cmr(text: str) -> dict | None:
-    """Parse CMR notification text. Returns {amount, merchant, date} or None."""
-    # Clean Tasker placeholders
-    clean = re.sub(r'%20|%evtprm\d|%NTITLE|%NTEXT|cl\.android', '', text).strip()
-    
-    # Pattern: "Compraste $X.XXX en MERCHANT ... CHL"
-    pattern = r"Compraste\s+\$?([\d.]+)\s+en\s+(.+?)(?:\s+(?:SANTIAGO|CHL|Las Condes|Con tu))"
-    match = re.search(pattern, clean, re.IGNORECASE)
-    if not match:
-        # Try simpler: "Compraste $X.XXX en ... CON TU"
-        pattern2 = r"Compraste\s+\$?([\d.]+)\s+en\s+(.+?)(?:\s+Con tu)"
-        match = re.search(pattern2, clean, re.IGNORECASE)
-    if match:
-        amount_str = match.group(1).replace(".", "")
-        merchant = match.group(2).strip()[:60]
-        try:
-            amount = int(amount_str)
-        except ValueError:
-            return None
-        return {
-            "amount": amount,
-            "merchant": merchant,
-        }
-    return None
-
-
-def register_notion(amount: int, merchant: str, category: str) -> bool:
+def register_notion(amount: int, merchant: str, category: str, source: str = "CMR") -> bool:
     """Register expense in Notion Movimientos DB."""
     if not NOTION_API_KEY:
         return False
     today = datetime.now().strftime("%Y-%m-%d")
+    merchant = f"{merchant} [{source}]"[:60]
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Notion-Version": "2025-09-03",
@@ -142,6 +112,72 @@ def send_telegram(message: str):
         app.logger.error(f"Telegram send failed: {resp.status_code} {resp.text}")
 
 
+def process_and_respond(amount: int, merchant: str, category: str, source: str):
+    """Register expense, get budget, send Telegram, return JSON."""
+    registered = register_notion(amount, merchant, category, source)
+    spent = get_monthly_spent()
+    remaining = BUDGET_MONTHLY - spent - amount
+
+    response = (
+        f"✅ **${amount:,}** registrado en *{merchant}* ({source})\n"
+        f"📂 Categoría: {category}\n"
+        f"💰 Te quedan **${remaining:,}** del presupuesto de julio"
+    )
+    send_telegram(response)
+
+    return jsonify({
+        "status": "ok",
+        "amount": amount,
+        "merchant": merchant,
+        "category": category,
+        "source": source,
+        "remaining": remaining,
+    })
+
+
+# ---- PARSERS ----
+
+def parse_cmr(text: str) -> dict | None:
+    """Parse CMR notification: 'Compraste $X.XXX en MERCHANT ... CHL'"""
+    clean = clean_text(text)
+    patterns = [
+        r"Compraste\s+\$?([\d.]+)\s+en\s+(.+?)(?:\s+(?:SANTIAGO|CHL|Las Condes|Con tu))",
+        r"Compraste\s+\$?([\d.]+)\s+en\s+(.+?)(?:\s+Con tu)",
+    ]
+    for p in patterns:
+        m = re.search(p, clean, re.IGNORECASE)
+        if m:
+            try:
+                amount_str = m.group(1).replace(".", "")
+                return {
+                    "amount": int(amount_str),
+                    "merchant": m.group(2).strip()[:60],
+                }
+            except ValueError:
+                return None
+    return None
+
+
+def parse_scotiabank(text: str) -> dict | None:
+    """Parse Scotia notification: 'App Scotia. Se realizó un pago ... por $X.XXX en MERCHANT.'"""
+    clean = clean_text(text)
+    # Pattern: pago ... por $X.XXX en MERCHANT
+    pattern = r"pago[^$]*\$?([\d.]+)\s+en\s+(.+?)(?:\.|$|Si\s+desconoces)"
+    m = re.search(pattern, clean, re.IGNORECASE)
+    if m:
+        try:
+            amount_str = m.group(1).replace(".", "")
+            return {
+                "amount": int(amount_str),
+                "merchant": m.group(2).strip()[:60],
+            }
+        except ValueError:
+            return None
+    return None
+
+
+# ---- ENDPOINTS ----
+
 @app.route("/")
 def home():
     return jsonify({"status": "ok", "service": "budget-webhook"})
@@ -149,7 +185,6 @@ def home():
 
 @app.route("/test-telegram", methods=["GET"])
 def test_telegram():
-    """Test endpoint to check Telegram connectivity."""
     if not TELEGRAM_BOT_TOKEN:
         return jsonify({"error": "TELEGRAM_BOT_TOKEN not set"}), 400
     if not TELEGRAM_GROUP_ID:
@@ -165,49 +200,51 @@ def test_telegram():
         "response": resp.json() if resp.ok else resp.text[:200],
     })
 
+
 @app.route("/tasker", methods=["GET"])
 def tasker_webhook():
-    """Endpoint that Tasker calls with CMR notifications."""
+    """Generic endpoint — auto-detect CMR or Scotia."""
     text = request.args.get("text", "")
     if not text:
         return jsonify({"ok": False, "reason": "no text"}), 200
 
-    # Silently ignore non-CMR notifications (battery, offers, etc.)
-    if not is_relevant_notification(text):
-        return jsonify({"ok": True, "reason": "ignored"}), 200
+    parsed = parse_cmr(text)
+    if parsed:
+        cat = infer_category(parsed["merchant"])
+        return process_and_respond(parsed["amount"], parsed["merchant"], cat, "CMR")
 
+    parsed = parse_scotiabank(text)
+    if parsed:
+        cat = infer_category(parsed["merchant"])
+        return process_and_respond(parsed["amount"], parsed["merchant"], cat, "Scotia")
+
+    return jsonify({"ok": True, "reason": "not a recognized expense"}), 200
+
+
+@app.route("/tasker/cmr", methods=["GET"])
+def tasker_cmr():
+    """CMR-only endpoint."""
+    text = request.args.get("text", "")
+    if not text:
+        return jsonify({"ok": False, "reason": "no text"}), 200
     parsed = parse_cmr(text)
     if not parsed:
         return jsonify({"ok": True, "reason": "not a CMR purchase"}), 200
+    cat = infer_category(parsed["merchant"])
+    return process_and_respond(parsed["amount"], parsed["merchant"], cat, "CMR")
 
-    amount = parsed["amount"]
-    merchant = parsed["merchant"]
-    category = infer_category(merchant)
 
-    # Register in Notion
-    registered = register_notion(amount, merchant, category)
-
-    # Get budget remaining
-    spent = get_monthly_spent()
-    remaining = BUDGET_MONTHLY - spent - amount
-
-    # Format response
-    response = (
-        f"✅ **${amount:,}** registrado en *{merchant}*\n"
-        f"📂 Categoría: {category}\n"
-        f"💰 Te quedan **${remaining:,}** del presupuesto de julio"
-    )
-
-    # Send to Telegram group
-    send_telegram(response)
-
-    return jsonify({
-        "status": "ok",
-        "amount": amount,
-        "merchant": merchant,
-        "category": category,
-        "remaining": remaining,
-    })
+@app.route("/tasker/scotiabank", methods=["GET"])
+def tasker_scotiabank():
+    """Scotia-only endpoint."""
+    text = request.args.get("text", "")
+    if not text:
+        return jsonify({"ok": False, "reason": "no text"}), 200
+    parsed = parse_scotiabank(text)
+    if not parsed:
+        return jsonify({"ok": True, "reason": "not a Scotia expense"}), 200
+    cat = infer_category(parsed["merchant"])
+    return process_and_respond(parsed["amount"], parsed["merchant"], cat, "Scotia")
 
 
 if __name__ == "__main__":
