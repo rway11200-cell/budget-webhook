@@ -11,7 +11,6 @@ app = Flask(__name__)
 NOTION_API_KEY = os.environ.get("NOTION_API_TOKEN", "")
 MOVIMIENTOS_DB = os.environ.get("MOVIMIENTOS_DB", "")
 PERIODO_DB = "39d06589-4ee5-8036-a3ef-c73eadeae4f8"
-BUDGET_MONTHLY = None  # Will be fetched from Notion
 
 CATEGORY_KEYWORDS = {
     "comida": ["restaurant", "starbucks", "café", "sushi", "pizza", "delivery", "pedidos", "super", "tottus", "lider", "jumbo", "mercado"],
@@ -42,58 +41,64 @@ def clean_text(text: str) -> str:
     return re.sub(r'%20|%evtprm\d|%NTITLE|%NTEXT|cl\.android', '', text).strip()
 
 
-def register_notion(amount: int, merchant: str, category: str, source: str = "CMR") -> bool:
-    """Register expense in Notion Movimientos DB."""
+def get_active_period() -> tuple[int, str] | None:
+    """Fetch the active period from Notion Periodo DB.
+    Returns (budget, page_id) or None if no active period found."""
     if not NOTION_API_KEY:
-        return False
-    today = datetime.now().strftime("%Y-%m-%d")
-    merchant = f"{merchant} [{source}]"[:60]
+        return None
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
         "Notion-Version": "2025-09-03",
         "Content-Type": "application/json",
     }
-    data = {
-        "parent": {"type": "data_source_id", "data_source_id": MOVIMIENTOS_DB},
-        "properties": {
-            "Name": {"title": [{"text": {"content": merchant}}]},
-            "$": {"number": amount},
-            "Fecha": {"date": {"start": today}},
-            "Categoria": {"select": {"name": category}},
-        },
-    }
-    resp = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
-    return resp.status_code == 200
-
-
-def get_monthly_budget() -> int:
-    """Fetch the current month's budget from Notion Periodo DB."""
-    if not NOTION_API_KEY:
-        return 1_000_000  # fallback
-    headers = {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Notion-Version": "2025-09-03",
-        "Content-Type": "application/json",
-    }
-    # Find the active period page
-    data = {"filter": {"property": "Activo", "checkbox": {"equals": True}}}
+    data = {"filter": {"property": "Activo", "checkbox": {"equals": True}}, "page_size": 1}
     resp = requests.post(
         f"https://api.notion.com/v1/data_sources/{PERIODO_DB}/query",
         headers=headers,
         json=data,
     )
     if resp.status_code != 200:
-        return 1_000_000
+        return None
     for result in resp.json().get("results", []):
+        page_id = result.get("id", "")
         props = result.get("properties", {})
+        budget = 1_000_000
         for k, v in props.items():
             if v.get("type") == "number":
-                return v.get("number", 1_000_000)
-    return 1_000_000
+                budget = v.get("number", 1_000_000)
+        return (budget, page_id)
+    return None
 
 
-def get_monthly_spent() -> int:
-    """Get total spent this month from Notion."""
+def register_notion(amount: int, merchant: str, category: str, source: str = "CMR", period_page_id: str = "") -> bool:
+    """Register expense in Notion Movimientos DB with period relation."""
+    if not NOTION_API_KEY:
+        return False
+    today = datetime.now().strftime("%Y-%m-%d")
+    merchant_display = f"{merchant} [{source}]"[:60]
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Notion-Version": "2025-09-03",
+        "Content-Type": "application/json",
+    }
+    props = {
+        "Name": {"title": [{"text": {"content": merchant_display}}]},
+        "$": {"number": amount},
+        "Fecha": {"date": {"start": today}},
+        "Categoria": {"select": {"name": category}},
+    }
+    if period_page_id:
+        props["Periodo"] = {"relation": [{"id": period_page_id}]}
+    data = {
+        "parent": {"type": "data_source_id", "data_source_id": MOVIMIENTOS_DB},
+        "properties": props,
+    }
+    resp = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
+    return resp.status_code == 200
+
+
+def get_monthly_spent(period_page_id: str = "") -> int:
+    """Get total spent from Notion, filtered by period relation."""
     if not NOTION_API_KEY:
         return 0
     headers = {
@@ -101,14 +106,12 @@ def get_monthly_spent() -> int:
         "Notion-Version": "2025-09-03",
         "Content-Type": "application/json",
     }
-    month_start = datetime.now().strftime("%Y-%m-01")
-    month_end = datetime.now().strftime("%Y-%m-%d")
-    data = {
-        "filter": {
-            "property": "Fecha",
-            "date": {"on_or_after": month_start, "on_or_before": month_end},
+    data = {"page_size": 100}
+    if period_page_id:
+        data["filter"] = {
+            "property": "Periodo",
+            "relation": {"contains": period_page_id},
         }
-    }
     resp = requests.post(
         f"https://api.notion.com/v1/databases/{MOVIMIENTOS_DB}/query",
         headers=headers,
@@ -141,15 +144,23 @@ def send_telegram(message: str):
 
 def process_and_respond(amount: int, merchant: str, category: str, source: str):
     """Register expense, get budget, send Telegram, return JSON."""
-    registered = register_notion(amount, merchant, category, source)
-    budget = get_monthly_budget()
-    spent = get_monthly_spent()
+    active = get_active_period()
+    period_page_id = active[1] if active else ""
+    budget = active[0] if active else 1_000_000
+
+    registered = register_notion(amount, merchant, category, source, period_page_id)
+    spent = get_monthly_spent(period_page_id)
     remaining = budget - spent - amount
+
+    # Get period name from active
+    period_name = "del periodo"
+    if active:
+        period_name = f"de {active[1][:8]}..."  # Will be replaced with proper name
 
     response = (
         f"✅ **${amount:,}** registrado en *{merchant}* ({source})\n"
         f"📂 Categoría: {category}\n"
-        f"💰 Te quedan **${remaining:,}** del presupuesto de julio"
+        f"💰 Te quedan **${remaining:,}** del presupuesto"
     )
     send_telegram(response)
 
@@ -160,6 +171,7 @@ def process_and_respond(amount: int, merchant: str, category: str, source: str):
         "category": category,
         "source": source,
         "remaining": remaining,
+        "budget": budget,
     })
 
 
@@ -189,7 +201,6 @@ def parse_cmr(text: str) -> dict | None:
 def parse_scotiabank(text: str) -> dict | None:
     """Parse Scotia notification: 'App Scotia. Se realizó un pago ... por $X.XXX en MERCHANT.'"""
     clean = clean_text(text)
-    # Pattern: pago ... por $X.XXX en MERCHANT
     pattern = r"pago[^$]*\$?([\d.]+)\s+en\s+(.+?)(?:\.|$|Si\s+desconoces)"
     m = re.search(pattern, clean, re.IGNORECASE)
     if m:
