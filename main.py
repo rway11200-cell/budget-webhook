@@ -184,7 +184,7 @@ def get_budget_summary(period_page_id: str = "", budget: int = 1_000_000) -> dic
 
 
 def format_budget_summary(s: dict, merchant: str = "", amount: int = 0, category: str = "", source: str = ""):
-    """Format a budget summary into a Telegram message."""
+    """Format a budget summary into a Telegram (/text) message."""
     lines = []
     if merchant:
         lines.append(f"✅ **${amount:,}** registrado en *{merchant}* ({source})")
@@ -272,12 +272,23 @@ def home():
 
 @app.route("/status", methods=["GET"])
 def budget_status():
-    """Get current budget status — useful for Fosforito to answer questions."""
+    """Get current budget status (JSON)."""
     active = get_active_period()
     period_page_id = active[1] if active else ""
     budget = active[0] if active else 1_000_000
     summary = get_budget_summary(period_page_id, budget)
     return jsonify(summary)
+
+
+@app.route("/status/text", methods=["GET"])
+def budget_status_text():
+    """Get current budget status as plain text (easy for Fosforito to read)."""
+    active = get_active_period()
+    period_page_id = active[1] if active else ""
+    budget = active[0] if active else 1_000_000
+    summary = get_budget_summary(period_page_id, budget)
+    msg = format_budget_summary(summary)
+    return msg, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/test-telegram", methods=["GET"])
