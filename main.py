@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import sys
 from datetime import datetime
 
 import requests
@@ -304,6 +305,8 @@ def tasker_webhook():
     if DEBUG:
         app.logger.info(f"DEBUG /tasker text={text[:300]}")
         print(f"DEBUG /tasker text={text[:300]}", flush=True)
+        sys.stderr.write(f"DEBUG /tasker text={text[:300]}\n")
+        sys.stderr.flush()
     if not text:
         return jsonify({"ok": False, "reason": "no text"}), 200
 
@@ -326,6 +329,8 @@ def tasker_cmr():
     text = request.args.get("text", "")
     if DEBUG:
         print(f"DEBUG /tasker/cmr text={text[:300]}", flush=True)
+        sys.stderr.write(f"DEBUG /tasker/cmr text={text[:300]}\n")
+        sys.stderr.flush()
     if not text:
         return jsonify({"ok": False, "reason": "no text"}), 200
     parsed = parse_cmr(text)
