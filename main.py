@@ -78,22 +78,25 @@ def register_notion(amount: int, merchant: str, category: str, source: str = "CM
     merchant_display = f"{merchant} [{source}]"[:60]
     headers = {
         "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Notion-Version": "2025-09-03",
+        "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
     props = {
-        "Name": {"title": [{"text": {"content": merchant_display}}]},
-        "$": {"number": amount},
+        "Nombre": {"title": [{"text": {"content": merchant_display}}]},
+        "Monto": {"number": amount},
         "Fecha": {"date": {"start": today}},
         "Categoria": {"select": {"name": category}},
     }
     if period_page_id:
         props["Periodo"] = {"relation": [{"id": period_page_id}]}
     data = {
-        "parent": {"type": "data_source_id", "data_source_id": MOVIMIENTOS_DB},
+        "parent": {"database_id": MOVIMIENTOS_DB},
         "properties": props,
     }
     resp = requests.post("https://api.notion.com/v1/pages", headers=headers, json=data)
+    app.logger.info(f"Notion create page: {resp.status_code}")
+    if not resp.ok:
+        app.logger.error(f"Notion error: {resp.text[:200]}")
     return resp.status_code == 200
 
 
