@@ -85,7 +85,7 @@ def register_notion(amount: int, merchant: str, category: str, source: str = "CM
         "Nombre": {"title": [{"text": {"content": merchant_display}}]},
         "Monto": {"number": amount},
         "Fecha": {"date": {"start": today}},
-        "Categoria": {"select": {"name": category}},
+        "Categoría": {"select": {"name": category}},
     }
     if period_page_id:
         props["Periodo"] = {"relation": [{"id": period_page_id}]}
