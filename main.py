@@ -324,6 +324,8 @@ def tasker_webhook():
 def tasker_cmr():
     """CMR-only endpoint."""
     text = request.args.get("text", "")
+    if DEBUG:
+        print(f"DEBUG /tasker/cmr text={text[:300]}", flush=True)
     if not text:
         return jsonify({"ok": False, "reason": "no text"}), 200
     parsed = parse_cmr(text)
