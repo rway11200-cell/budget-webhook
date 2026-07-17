@@ -1,4 +1,4 @@
-## Sistema de presupuesto en tiempo real — ingesta HTTP + Notion + Fosforito
+## Sistema de presupuesto en tiempo real — FastAPI + Notion + Fosforito
 
 ### Estado: ✅ COMPLETADO
 
@@ -7,6 +7,8 @@
 ```
 Tasker (Android) → HTTP GET → Railway (budget-webhook) → Notion DB Movimientos → Telegram group "Presupuesto CorJar"
 ```
+
+**Stack actualizado:** Flask → FastAPI con Swagger en `/docs` y `/redoc`.
 
 ### Enlaces
 
@@ -21,13 +23,24 @@ Tasker (Android) → HTTP GET → Railway (budget-webhook) → Notion DB Movimie
 
 | Endpoint | Método | Qué hace |
 |---|---|---|
+| `/` | GET | Health check: `{"status": "ok", "service": "budget-webhook"}` |
+| `/health` | GET | Health check: `{"status": "ok"}` |
+| `/status` | GET | Resumen de presupuesto en JSON |
+| `/status/text` | GET | Resumen de presupuesto en texto plano (para Fosforito) |
 | `/tasker` | GET | Detecta automáticamente CMR o Scotia |
 | `/tasker/cmr` | GET | Solo compras CMR (Banco Falabella) |
 | `/tasker/scotiabank` | GET | Solo pagos Scotia |
-| `/` | GET | Health check: `{"status": "ok"}` |
 | `/test-telegram` | GET | Envía mensaje de test al grupo |
 
-Todos reciben `?text=...` con el texto de la notificación bancaria.
+Todos los endpoints Tasker reciben `?text=...` con el texto de la notificación bancaria.
+
+### Documentación interactiva
+
+| URL | Descripción |
+|---|---|
+| `/docs` | Swagger UI |
+| `/redoc` | ReDoc |
+| `/openapi.json` | Especificación OpenAPI
 
 ### Variables de entorno (Railway)
 
