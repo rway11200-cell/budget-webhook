@@ -1,4 +1,6 @@
 from app.main import app
+from app.coding_loop import repository as coding_loop_repository
+from app.coding_loop import service as coding_loop_service
 from app.notion import routes as notion_routes
 from app.notion import service as notion_service
 from app.planning import repository as planning_repository
@@ -318,3 +320,123 @@ def test_planning_update_rejects_null_completed():
         assert str(error) == "completed cannot be null"
     else:
         raise AssertionError("Expected completed null to be rejected")
+
+
+def coding_loop_page(resource):
+    common = {"id": f"{resource}-id", "properties": {}}
+    if resource == "projects":
+        common["properties"] = {
+            "Project": {"title": [{"plain_text": "Nexo"}]},
+            "Auto commit": {"checkbox": True},
+            "Branch": {"rich_text": [{"plain_text": "main"}]},
+            "OpenCode Sesion": {"rich_text": []},
+            "Priority": {"select": {"name": "High"}},
+            "Repo Path": {"url": "https://github.com/example/nexo"},
+            "Status": {"select": {"name": "Active"}},
+            "Updated": {"date": {"start": "2026-07-18"}},
+        }
+    elif resource == "tasks":
+        common["properties"] = {
+            "Task": {"title": [{"plain_text": "Implement API"}]},
+            "Approved": {"checkbox": True},
+            "Attempts": {"number": 1},
+            "Created": {"date": None},
+            "Last result": {"rich_text": []},
+            "Next actions": {"rich_text": []},
+            "Priority": {"select": {"name": "High"}},
+            "Project": {"relation": [{"id": "projects-id"}]},
+            "Status": {"select": {"name": "in Progress"}},
+            "Updated": {"date": None},
+        }
+    elif resource == "runs":
+        common["properties"] = {
+            "Run ID": {"title": [{"plain_text": "run-1"}]},
+            "Duration": {"number": 20},
+            "OpenIA available": {"checkbox": True},
+            "Status": {"select": {"name": "Success"}},
+            "Summary": {"rich_text": [{"plain_text": "Completed"}]},
+            "Task": {"relation": [{"id": "tasks-id"}]},
+            "Timestamp": {"date": {"start": "2026-07-18"}},
+        }
+    else:
+        common["properties"] = {
+            "Run ID": {"title": [{"plain_text": "run-error"}]},
+            "Duration": {"number": 5},
+            "Status": {"select": {"name": "Failed"}},
+            "Summary": {"rich_text": [{"plain_text": "Test failed"}]},
+            "Timestamp": {"date": {"start": "2026-07-18"}},
+        }
+    return common
+
+
+def test_coding_loop_requires_admin_key(monkeypatch):
+    monkeypatch.setattr(notion_routes, "NOTION_ADMIN_API_KEY", "admin-secret")
+    resp = client.get("/coding-loop/projects")
+    assert resp.status_code == 401
+
+
+def test_coding_loop_resources(monkeypatch):
+    monkeypatch.setattr(notion_routes, "NOTION_ADMIN_API_KEY", "admin-secret")
+    headers = {"X-API-Key": "admin-secret"}
+
+    monkeypatch.setattr(
+        coding_loop_repository,
+        "query",
+        lambda resource, payload: {
+            "results": [coding_loop_page(resource)],
+            "has_more": False,
+        },
+    )
+
+    projects = client.get("/coding-loop/projects", headers=headers)
+    tasks = client.get(
+        "/coding-loop/tasks?status=In%20Progress&approved=true",
+        headers=headers,
+    )
+    runs = client.get("/coding-loop/runs", headers=headers)
+    errors = client.get("/coding-loop/test-errors", headers=headers)
+
+    assert projects.json()["items"][0]["project"] == "Nexo"
+    assert tasks.json()["items"][0]["status"] == "In Progress"
+    assert tasks.json()["items"][0]["project_id"] == "projects-id"
+    assert runs.json()["items"][0]["task_id"] == "tasks-id"
+    assert errors.json()["items"][0]["summary"] == "Test failed"
+
+
+def test_coding_loop_task_filter_and_create_mapping(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        coding_loop_repository,
+        "query",
+        lambda resource, payload: captured.setdefault("query", payload) or {"results": []},
+    )
+
+    coding_loop_service.list_records(
+        "tasks", "In Progress", "Project", "project-id", "Approved", True, 25, None
+    )
+
+    filters = captured["query"]["filter"]["and"]
+    assert {"property": "Status", "select": {"equals": "in Progress"}} in filters
+    assert {"property": "Approved", "checkbox": {"equals": True}} in filters
+
+    from app.coding_loop.schemas import TaskCreate
+
+    def capture_create(resource, properties):
+        captured["resource"] = resource
+        captured["properties"] = properties
+        return coding_loop_page("tasks")
+
+    monkeypatch.setattr(coding_loop_repository, "create", capture_create)
+    coding_loop_service.create_record(
+        "tasks",
+        TaskCreate(
+            task="Implement API",
+            project_id="project-id",
+            status="In Progress",
+            approved=True,
+        ),
+    )
+
+    assert captured["resource"] == "tasks"
+    assert captured["properties"]["Project"] == {"relation": [{"id": "project-id"}]}
+    assert captured["properties"]["Status"] == {"select": {"name": "in Progress"}}

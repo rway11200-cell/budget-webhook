@@ -27,6 +27,11 @@ app/
 ├── __init__.py
 ├── config.py            # Environment variables
 ├── main.py              # FastAPI app, routers, CORS
+├── coding_loop/         # Projects, Tasks, Runs, Test Errors
+│   ├── routes.py
+│   ├── schemas.py
+│   ├── service.py
+│   └── repository.py
 ├── health/
 │   ├── __init__.py
 │   └── routes.py        # GET /health
@@ -103,6 +108,10 @@ curl "http://localhost:8000/tasker?text=Compraste%20%241.500%20en%20Starbucks%20
 | `NOTION_API_TOKEN` | Notion integration token |
 | `NOTION_ADMIN_API_KEY` | Secret required in `X-API-Key` for CRUD endpoints |
 | `PLANNING_2026_DATABASE_ID` | Notion database used by `/planning` |
+| `CODING_LOOP_PROJECTS_DATABASE_ID` | Autonomous Coding Loop projects database |
+| `CODING_LOOP_TASKS_DATABASE_ID` | Autonomous Coding Loop tasks database |
+| `CODING_LOOP_RUNS_DATABASE_ID` | Autonomous Coding Loop run log database |
+| `CODING_LOOP_ERRORS_DATABASE_ID` | Autonomous Coding Loop test errors database |
 | `MOVIMIENTOS_DB` | Notion database ID for expenses |
 | `PERIODO_DB` | Notion database ID for periods |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
@@ -136,3 +145,14 @@ curl "http://localhost:8000/planning/summary?year=2026" \
 ```
 
 See [Planning 2026 API](docs/planning-2026.md) for the complete data model and examples.
+
+## Autonomous Coding Loop
+
+The `/coding-loop` API provides typed CRUD access to Projects, Tasks, Run Log, and Run Test Error. Relations use `project_id` and `task_id`, so AI clients do not need to construct raw Notion payloads.
+
+```bash
+curl "http://localhost:8000/coding-loop/tasks?status=Ready&approved=true" \
+  -H "X-API-Key: $NOTION_ADMIN_API_KEY"
+```
+
+See [Autonomous Coding Loop API](docs/autonomous-coding-loop.md) for every resource and payload.
