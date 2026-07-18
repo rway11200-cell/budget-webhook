@@ -1,6 +1,8 @@
 from app.main import app
 from app.notion import routes as notion_routes
 from app.notion import service as notion_service
+from app.planning import repository as planning_repository
+from app.planning import service as planning_service
 from app.tasker import service
 from fastapi.testclient import TestClient
 
@@ -221,3 +223,98 @@ def test_notion_crud_endpoints(monkeypatch):
     assert read.status_code == 200
     assert updated.status_code == 200
     assert deleted.json() == {"id": "page-id", "archived": True}
+
+
+def planning_page(
+    page_id="planning-id",
+    name="Comprar escritorio",
+    month="Abril",
+    tags=None,
+    budget=120000,
+    completed=False,
+):
+    return {
+        "id": page_id,
+        "url": f"https://notion.so/{page_id}",
+        "properties": {
+            "Name": {"title": [{"plain_text": name}]},
+            "Año": {"select": {"name": "2026"}},
+            "Mes": {"select": {"name": month} if month else None},
+            "Tag": {"multi_select": [{"name": tag} for tag in (tags or [])]},
+            "Valor Estimado o Presupuesto": {"number": budget},
+            "Completado": {"checkbox": completed},
+        },
+    }
+
+
+def test_planning_requires_admin_key(monkeypatch):
+    monkeypatch.setattr(notion_routes, "NOTION_ADMIN_API_KEY", "admin-secret")
+    resp = client.get("/planning/items")
+    assert resp.status_code == 401
+
+
+def test_planning_crud(monkeypatch):
+    monkeypatch.setattr(notion_routes, "NOTION_ADMIN_API_KEY", "admin-secret")
+    headers = {"X-API-Key": "admin-secret"}
+    page = planning_page(tags=["Cocina"])
+
+    monkeypatch.setattr(planning_repository, "query_items", lambda payload: {"results": [page]})
+    monkeypatch.setattr(planning_repository, "create_item", lambda properties: page)
+    monkeypatch.setattr(planning_repository, "get_item", lambda page_id: page)
+    monkeypatch.setattr(planning_repository, "update_item", lambda page_id, properties: page)
+    monkeypatch.setattr(
+        planning_repository,
+        "archive_item",
+        lambda page_id: {"id": page_id, "archived": True},
+    )
+
+    listed = client.get("/planning/items?month=Abril", headers=headers)
+    created = client.post(
+        "/planning/items",
+        headers=headers,
+        json={"name": "Comprar escritorio", "month": "Abril", "tags": ["Cocina"]},
+    )
+    read = client.get("/planning/items/planning-id", headers=headers)
+    updated = client.patch(
+        "/planning/items/planning-id",
+        headers=headers,
+        json={"completed": True},
+    )
+    deleted = client.delete("/planning/items/planning-id", headers=headers)
+
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["month"] == "Abril"
+    assert created.status_code == 201
+    assert read.json()["name"] == "Comprar escritorio"
+    assert updated.status_code == 200
+    assert deleted.json() == {"id": "planning-id", "archived": True}
+
+
+def test_planning_summary(monkeypatch):
+    pages = [
+        planning_page("one", month="Enero", tags=["Cocina"], budget=100, completed=True),
+        planning_page("two", month=None, tags=[], budget=200, completed=False),
+    ]
+    monkeypatch.setattr(
+        planning_repository,
+        "query_items",
+        lambda payload: {"results": pages, "has_more": False},
+    )
+
+    summary = planning_service.get_summary("2026", None, None)
+
+    assert summary["item_count"] == 2
+    assert summary["completed_count"] == 1
+    assert summary["pending_budget"] == 200
+    assert {group["name"] for group in summary["by_month"]} == {"Enero", "Sin mes"}
+
+
+def test_planning_update_rejects_null_completed():
+    from app.planning.schemas import PlanningItemUpdate
+
+    try:
+        planning_service.update_item("planning-id", PlanningItemUpdate(completed=None))
+    except ValueError as error:
+        assert str(error) == "completed cannot be null"
+    else:
+        raise AssertionError("Expected completed null to be rejected")

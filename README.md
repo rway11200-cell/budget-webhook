@@ -35,6 +35,11 @@ app/
 │   ├── schemas.py
 │   ├── service.py
 │   └── repository.py
+├── planning/            # Typed Planeación 2026 API
+│   ├── routes.py
+│   ├── schemas.py
+│   ├── service.py
+│   └── repository.py
 └── tasker/
     ├── __init__.py
     ├── routes.py        # HTTP endpoints
@@ -97,6 +102,7 @@ curl "http://localhost:8000/tasker?text=Compraste%20%241.500%20en%20Starbucks%20
 |---|---|
 | `NOTION_API_TOKEN` | Notion integration token |
 | `NOTION_ADMIN_API_KEY` | Secret required in `X-API-Key` for CRUD endpoints |
+| `PLANNING_2026_DATABASE_ID` | Notion database used by `/planning` |
 | `MOVIMIENTOS_DB` | Notion database ID for expenses |
 | `PERIODO_DB` | Notion database ID for periods |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
@@ -116,3 +122,17 @@ curl "http://localhost:8000/notion/databases/<database_id>/schema" \
 ```
 
 See [Notion CRUD](docs/notion-crud.md) for query, create, update, and archive examples.
+
+## Planning 2026
+
+The typed `/planning` API translates the Notion properties into AI-friendly fields and provides CRUD, prioritized pending items, and grouped summaries.
+
+```bash
+curl "http://localhost:8000/planning/pending?year=2026" \
+  -H "X-API-Key: $NOTION_ADMIN_API_KEY"
+
+curl "http://localhost:8000/planning/summary?year=2026" \
+  -H "X-API-Key: $NOTION_ADMIN_API_KEY"
+```
+
+See [Planning 2026 API](docs/planning-2026.md) for the complete data model and examples.

@@ -36,6 +36,10 @@ Tasker (Android) → HTTP GET → Railway (budget-webhook) → Notion DB Movimie
 | `/notion/databases/{id}/query` | POST | Consulta páginas de una base |
 | `/notion/databases/{id}/pages` | POST | Crea una página |
 | `/notion/pages/{id}` | GET/PATCH/DELETE | Lee, actualiza o archiva una página |
+| `/planning/items` | GET/POST | Lista o crea elementos de Planeación 2026 |
+| `/planning/items/{id}` | GET/PATCH/DELETE | Lee, actualiza o archiva un elemento |
+| `/planning/pending` | GET | Pendientes priorizados por presupuesto |
+| `/planning/summary` | GET | Totales agrupados por mes y etiqueta |
 
 Todos los endpoints Tasker reciben `?text=...` con el texto de la notificación bancaria.
 
@@ -53,6 +57,7 @@ Todos los endpoints Tasker reciben `?text=...` con el texto de la notificación 
 |---|---|---|
 | `NOTION_API_TOKEN` | `ntn_F17034...` | Token integración "Hermes" (workspace Seba Personal) |
 | `NOTION_ADMIN_API_KEY` | Secreto aleatorio | Protege los endpoints genéricos `/notion` |
+| `PLANNING_2026_DATABASE_ID` | `2d406589-4ee5-8035-987f-d110e5d30e3d` | Base Planeación 2026 |
 | `MOVIMIENTOS_DB` | `2d806589-4ee5-809d-920f-e252d20d3d8c` | Database ID de "Movimientos" |
 | `TELEGRAM_BOT_TOKEN` | `8721430395:...` | Token de Fosforito |
 | `TELEGRAM_GROUP_ID` | `-1004337757506` | Chat ID del grupo "Presupuesto CorJar" |

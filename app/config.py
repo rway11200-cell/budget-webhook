@@ -6,6 +6,10 @@ load_dotenv()
 
 NOTION_API_TOKEN = os.environ.get("NOTION_API_TOKEN", "")
 NOTION_ADMIN_API_KEY = os.environ.get("NOTION_ADMIN_API_KEY", "")
+PLANNING_2026_DATABASE_ID = os.environ.get(
+    "PLANNING_2026_DATABASE_ID",
+    "2d406589-4ee5-8035-987f-d110e5d30e3d",
+)
 MOVIMIENTOS_DB = os.environ.get("MOVIMIENTOS_DB", "")
 PERIODO_DB = os.environ.get("PERIODO_DB", "39d06589-4ee5-8036-a3ef-c73eadeae4f8")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")

@@ -56,6 +56,10 @@ def get_database(database_id: str) -> dict:
     return _request("GET", f"/databases/{database_id}")
 
 
+def update_database(database_id: str, payload: dict) -> dict:
+    return _request("PATCH", f"/databases/{database_id}", payload)
+
+
 def search_databases(query: str | None = None, start_cursor: str | None = None) -> dict:
     payload: dict[str, Any] = {
         "filter": {"property": "object", "value": "database"},
